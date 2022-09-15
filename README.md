@@ -1,5 +1,24 @@
 # I-Bus Altitude Sensor for FlySky Telemetry
 
+## Forked status
+
+I had to rewrite the original code becasue it was garbage.
+
+### Software Changes
+
+* Precise battery voltage measurement
+* Usable climb rate values
+* GPS altitude is removed because there's no such measurement
+
+### Hardware changes
+
+* I'm using 10k/1k battery voltage divider
+* An additioanal 10k resistor was needed between RX/TX line and GND (I dont know why)
+
+
+Here goes the original README
+
+
 ## Requirements
 
 * FlySky transmitter with AFHDS-2A telemetry. Preferably FS-i6 with
