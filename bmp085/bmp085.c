@@ -54,7 +54,7 @@ static long k[BMP085_AVARAGECOEF];
 long bmp085_avaragefilter(long input) {
 	uint8_t i=0;
 	long sum=0;
-	for (i=0; i<BMP085_AVARAGECOEF; i++) {
+	for (i=0; i<BMP085_AVARAGECOEF-1; i++) {
 		k[i] = k[i+1];
 	}
 	k[BMP085_AVARAGECOEF-1] = input;
@@ -68,7 +68,7 @@ long bmp085_avaragefilter(long input) {
 /*
  * read calibration registers
  */
-void bmp085_getcalibration() {
+void bmp085_getcalibration(void) {
 	uint8_t buff[2];
 	memset(buff, 0, sizeof(buff));
 
@@ -99,7 +99,7 @@ void bmp085_getcalibration() {
 /*
  * get raw temperature as read by registers, and do some calculation to convert it
  */
-void bmp085_getrawtemperature() {
+void bmp085_getrawtemperature(void) {
 	uint8_t buff[2];
 	memset(buff, 0, sizeof(buff));
 	long ut,x1,x2;
@@ -119,7 +119,7 @@ void bmp085_getrawtemperature() {
 /*
  * get raw pressure as read by registers, and do some calculation to convert it
  */
-void bmp085_getrawpressure() {
+void bmp085_getrawpressure(void) {
 	uint8_t buff[3];
 	memset(buff, 0, sizeof(buff));
 	long up,x1,x2,x3,b3,b6,p;
@@ -160,17 +160,16 @@ void bmp085_getrawpressure() {
 /*
  * get celsius temperature
  */
-double bmp085_gettemperature() {
+int16_t bmp085_gettemperature(void) {
 	bmp085_getrawtemperature();
-	double temperature = ((bmp085_rawtemperature + 8)>>4);
-	temperature = temperature /10;
+	int16_t temperature = ((bmp085_rawtemperature + 8)>>4);
 	return temperature;
 }
 
 /*
  * get pressure
  */
-int32_t bmp085_getpressure() {
+int32_t bmp085_getpressure(void) {
 	bmp085_getrawpressure();
 	return bmp085_rawpressure + BMP085_UNITPAOFFSET;
 }
@@ -178,15 +177,24 @@ int32_t bmp085_getpressure() {
 /*
  * get altitude
  */
-double bmp085_getaltitude() {
-	bmp085_getrawpressure();
-	return ((1 - pow(bmp085_rawpressure/(double)101325, 0.1903 )) / 0.0000225577) + BMP085_UNITMOFFSET;
+float bmp085_getaltitude(void) {
+  bmp085_getrawpressure();
+  return ((1.0f - pow((float)bmp085_rawpressure/101325.0f, 0.1903f )) / 0.0000225577f) + BMP085_UNITMOFFSET;
+}
+
+bmp085_measurements  bmp085_get_measurements(void)
+{
+  bmp085_measurements measurements;
+  measurements.altitude = bmp085_getaltitude();
+  measurements.temperature = ((bmp085_rawtemperature + 8)>>4);
+  measurements.pressure = bmp085_rawpressure + BMP085_UNITPAOFFSET;
+  return measurements;
 }
 
 /*
  * init bmp085
  */
-void bmp085_init() {
+void bmp085_init(void) {
 	#if BMP085_I2CINIT == 1
 	//init i2c
 	i2c_init();

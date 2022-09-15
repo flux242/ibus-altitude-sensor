@@ -65,10 +65,16 @@ int bmp085_regac1, bmp085_regac2, bmp085_regac3, bmp085_regb1, bmp085_regb2, bmp
 unsigned int bmp085_regac4, bmp085_regac5, bmp085_regac6;
 long bmp085_rawtemperature, bmp085_rawpressure;
 
+typedef struct {
+  int32_t pressure;
+  int16_t temperature;
+  float altitude;
+} bmp085_measurements;
 //functions
-extern void bmp085_init();
-extern int32_t bmp085_getpressure();
-extern double bmp085_getaltitude();
-extern double bmp085_gettemperature();
+void bmp085_init(void);
+int32_t bmp085_getpressure(void);
+float bmp085_getaltitude(void);
+int16_t bmp085_gettemperature(void);
+bmp085_measurements bmp085_get_measurements(void);
 
 #endif

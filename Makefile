@@ -21,7 +21,7 @@ AVRDUDE_PORT = /dev/ttyACM0
 
 #### END of user configuration ###############################################
 
-TARGET = ibus-sensor
+TARGET = main
 
 SRC +=	$(TARGET).c \
 	i2chw/twimaster.c
@@ -392,7 +392,7 @@ gccversion :
 
 # Program the device.  
 program: $(TARGET).hex $(TARGET).eep
-	$(AVRDUDE) $(AVRDUDE_FLAGS) $(AVRDUDE_WRITE_FLASH) $(AVRDUDE_WRITE_EEPROM)
+	while [ ! -c $(AVRDUDE_PORT) ]; do sleep 0.1;done;$(AVRDUDE) $(AVRDUDE_FLAGS) $(AVRDUDE_WRITE_FLASH) $(AVRDUDE_WRITE_EEPROM)
 
 
 # Generate avr-gdb config/init file which does the following:
