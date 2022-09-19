@@ -182,13 +182,11 @@ float bmp085_getaltitude(void) {
   return ((1.0f - pow((float)bmp085_rawpressure/101325.0f, 0.1903f )) / 0.0000225577f) + BMP085_UNITMOFFSET;
 }
 
-bmp085_measurements  bmp085_get_measurements(void)
+void bmp085_get_measurements(bmp085_measurements *measurements)
 {
-  bmp085_measurements measurements;
-  measurements.altitude = bmp085_getaltitude();
-  measurements.temperature = ((bmp085_rawtemperature + 8)>>4);
-  measurements.pressure = bmp085_rawpressure + BMP085_UNITPAOFFSET;
-  return measurements;
+  measurements->altitude = bmp085_getaltitude();
+  measurements->temperature = ((bmp085_rawtemperature + 8)>>4);
+  measurements->pressure = bmp085_rawpressure + BMP085_UNITPAOFFSET;
 }
 
 /*

@@ -14,14 +14,27 @@
 
 #include "ibus/ibus.h"
 
+// This needs to be adjusted if other valued than 10K/1K are used in the divider
+// Multiplier is chosen so that the maximum input voltage divided by that
+// multiplier is close by does not exceed REFERENCE_VOLTAGE
+#define BATTERY_VOLTAGE_MULTIPLIER 11   // (R1+R2)/R2 = (10k+1k)/1k = 11
+                                        // => BatVoltage(mV) = 11*100*2.56*ADCraw/1024 = 11*(ADCraw>>2)
+
+// Integration factors should be small to react faster to the input changes
+// but not too small to filter out noise.
 #define BATTERY_VOLTAGE_INTEGRATOR_FACTOR 1  // will be rshifted this amount
-#define ALTITUDE_INTEGRATOR_FACTOR 32        // will be divided this amount
+#define ALTITUDE_INTEGRATOR_FACTOR 40        // will be divided this amount
 
 // this multiplier is for 10k/1k voltage divider and __AVR_ATmega32U4__ target (2.56V ref voltage)
 #ifdef __AVR_ATmega32U4__
-#define BATTERY_VOLTAGE_MULTIPLIER 11u   // (R1+R2)/R2 = (10k+1k)/1k = 11
-                                         // BatVoltage(mV) = 11*100*2.56*ADCraw/1024 = 11*(ADCraw>>2)
+#define REFERENCE_VOLTAGE          2.56f //REFERENCE_VOLTAGE
 #endif
+
+#ifdef __AVR_ATmega328P__
+#define REFERENCE_VOLTAGE          1.1f //REFERENCE_VOLTAGE
+#endif
+
+#define REFERENCE_VOLTAGE_MULT_100 (REFERENCE_VOLTAGE*100.0f)
 
 // Due to the fact that voltage divider resistors aren't 
 // exactly 10k and 1k there is a gain error. At 12V battery 
@@ -40,15 +53,13 @@
 #define ADC_COMPENSATION
 
 #ifdef ADC_COMPENSATION
-#define ADC_OFFSET 1           // raw adc offset value
-#define ADC_GAIN 0.96309f
-//static const uint32_t ADC_GAIN_FACTOR = (uint32_t)(ADC_GAIN*(float)(2<<14));
-//static const uint32_t ADC_CORRECTION = (uint32_t)(ADC_GAIN*(float)ADC_OFFSET*(2<<14))+(uint32_t)(0.5f*(float)(2<<14));
-// compiler seems to be 2 stupid to calculate consts at compile time
-static const uint32_t ADC_GAIN_FACTOR = 31558;
-static const uint32_t ADC_CORRECTION =  47942; //31558+16384;
+#define ADC_OFFSET 1           // raw adc offset value. It can be negative
+//#define ADC_GAIN 0.96309f
+#define ADC_GAIN 0.964818f
+#else
+#define ADC_OFFSET 0           // raw adc offset value. It can be negative
+#define ADC_GAIN 1.0f
 #endif
-
 
 #define PACKET_BUF_SIZE 16  // the very same buffer is used for rx and tx because we have half-duplex uart
 
@@ -362,6 +373,8 @@ inline static uint16_t read_adc_sync(void)
   return adc_get_conversion_result();
 }
 
+static const float adc2voltage = (BATTERY_VOLTAGE_MULTIPLIER*REFERENCE_VOLTAGE_MULT_100)/1023.0f;
+
 /****************
  * @brief Returns battery voltage in mV
  */
@@ -378,13 +391,22 @@ static uint16_t getBatteryVoltage(void)
   }
   retValue = adc_get_conversion_result();
   adc_start_conversion(); // starting next converson even now
+                          // 11*100*2.56*ADCraw/1024
+#ifndef ADC_CALIBRATION
 #ifdef ADC_COMPENSATION
-  uint32_t retValueCompensated = (uint32_t)retValue * ADC_GAIN_FACTOR - ADC_CORRECTION;
-  retValue = (uint16_t)(retValueCompensated >> 15);
-#elif defined ADC_CALIBRATION
-  retValue += 100u;
+  if (((int16_t)retValue - ADC_OFFSET)>=0) {
+    retValue -= ADC_OFFSET;
+  }
 #endif
-  return  (retValue * BATTERY_VOLTAGE_MULTIPLIER) >> 2; 
+  float batVoltage =  (float)retValue*adc2voltage;
+#ifdef ADC_COMPENSATION
+  batVoltage = ADC_GAIN*batVoltage;  // floating point mult
+#endif
+  retValue = (uint16_t)batVoltage;
+#else
+  retValue += 100u; // if calibration is active return adc raw value + 100;
+#endif
+  return retValue;
 }
 
 uint16_t integrateBatteryVoltage(uint16_t newVoltage)
@@ -401,10 +423,10 @@ uint16_t integrateBatteryVoltage(uint16_t newVoltage)
   return integratedVoltage;
 }
 
-int32_t integrateAltitude(int32_t newAltitude)
+float integrateAltitude(float newAltitude)
 {
   static uint8_t isInitialized = 0u;
-  static int32_t integratedAltitude = 0u;
+  static float integratedAltitude = 0u;
   if (isInitialized != 0u)
   {
     integratedAltitude += ((newAltitude-integratedAltitude )/ALTITUDE_INTEGRATOR_FACTOR); // cumulative moving average
@@ -535,9 +557,17 @@ static void handle_rx_packet(uint8_t nextByte)
 }
 
 
-static int32_t initial_altitude = 0u;
-static int32_t old_altitude = 0u;
+static int32_t  initial_altitude = 0;
+static int32_t  old_altitude = 0;
+static int32_t  current_altitude = 0;
+static int32_t  altitude_diff = 0;
+static float    altitude_raw = 0.0f;
 static uint16_t old_time = 0u;
+static uint16_t current_time = 0u;
+static uint16_t time_diff = 0u;
+static int16_t  temperature_raw = 0;
+static uint16_t batVoltage = 0u;
+static int32_t  climb_rate = 0;
 
 int main(void)
 {
@@ -566,41 +596,47 @@ int main(void)
     // measurements
 
     // baterry voltage
-    uint16_t batVoltage = integrateBatteryVoltage(getBatteryVoltage());
+    batVoltage = integrateBatteryVoltage(getBatteryVoltage());
     if (batVoltage < 100 ) { // when unconnected, don't send the noise
       batVoltage  = 0;
     }
     sensors[EXTERNAL_SENSOR_VOLTAGE_INDEX].value16 = batVoltage;
 
+    // bmp sensor readings
+#ifdef SENSOR_BMP085
+    // bmp sensor readings at once
+    bmp085_measurements bmpMeasurements;
+    bmp085_get_measurements(&bmpMeasurements);
+    temperature_raw = bmpMeasurements.temperature;
+    altitude_raw = bmpMeasurements.altitude;
+#else
+    // bmp280 is not tested
+    bmp280_measure();  // do a measurement
+    temperature_raw = (int16_t)bmp280_gettemperature();
+    altitude_raw = (float)bmp280_getaltitude(); // they are using double, float would be enough
+#endif
     // temperature
-    sensors[EXTERNAL_SENSOR_TEMPERATURE_INDEX].value16 = (uint16_t)(bmp085_gettemperature()+400);
+    sensors[EXTERNAL_SENSOR_TEMPERATURE_INDEX].value16 = (uint16_t)(temperature_raw+400);
 
     // altitude and climb rate
-    int32_t altitude = integrateAltitude((int32_t)(100.0f*bmp085_getaltitude()));
-    int16_t current_time = system_counter_ms;
-    uint16_t time_diff = 0u;
-    if (current_time < old_time)
-    { // counter overflow situation
-      time_diff = (65535-old_time) + current_time;
-    }
-    else {
-      time_diff  = current_time - old_time;
-    }
+    current_altitude = (int32_t)integrateAltitude(100.0f*altitude_raw);
+    current_time = system_counter_ms;
+    time_diff = (uint16_t)(current_time - old_time);
     if (time_diff != 0) {
-      int32_t altitude_diff = altitude - old_altitude;
-      int32_t climb_rate = altitude_diff*1000/time_diff;
-      sensors[EXTERNAL_SENSOR_CLIMB_RATE_INDEX].value16 = (uint16_t)climb_rate; 
+      altitude_diff = current_altitude - old_altitude;
+      climb_rate = altitude_diff*1000/time_diff;
+      sensors[EXTERNAL_SENSOR_CLIMB_RATE_INDEX].value16 = (uint16_t)climb_rate;
     }
     old_time = current_time;
-    old_altitude = altitude;
+    old_altitude = current_altitude;
 
-    sensors[EXTERNAL_SENSOR_ALTITUDE].value32 = (uint32_t)altitude; 
+    sensors[EXTERNAL_SENSOR_ALTITUDE].value32 = (uint32_t)current_altitude;
     if ( (initial_altitude == 0) && (system_counter_ms > 5000))
     { // set initial altitude after 5 seconds first. Let the sensors warm up a little
-      initial_altitude = altitude;
+      initial_altitude = current_altitude;
     }
     if (initial_altitude != 0) {
-      sensors[EXTERNAL_SENSOR_ALTITUDE_MAX].value32 = (uint32_t)((altitude-initial_altitude)/100);
+      sensors[EXTERNAL_SENSOR_ALTITUDE_MAX].value32 = (uint32_t)((current_altitude-initial_altitude)/100);
     }
   }
 }

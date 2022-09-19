@@ -75,6 +75,6 @@ void bmp085_init(void);
 int32_t bmp085_getpressure(void);
 float bmp085_getaltitude(void);
 int16_t bmp085_gettemperature(void);
-bmp085_measurements bmp085_get_measurements(void);
+void bmp085_get_measurements(bmp085_measurements*);
 
 #endif
