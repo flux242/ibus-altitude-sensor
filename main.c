@@ -78,6 +78,7 @@ ibus_sensor_t sensors[] = {
   { IBUS_SENSOR_TYPE_EXTERNAL_VOLTAGE, {0u} },
   { IBUS_SENSOR_TYPE_TEMPERATURE, {0u} },
   { IBUS_SENSOR_TYPE_CLIMB_RATE, {0u} },
+  { IBUS_SENSOR_TYPE_GPS_ALT, {0u} },
   { IBUS_SENSOR_TYPE_ALT, {0} },
   { IBUS_SENSOR_TYPE_ALT_MAX, {0} }
 };
@@ -85,8 +86,9 @@ ibus_sensor_t sensors[] = {
 #define EXTERNAL_SENSOR_VOLTAGE_INDEX 1u
 #define EXTERNAL_SENSOR_TEMPERATURE_INDEX 2u
 #define EXTERNAL_SENSOR_CLIMB_RATE_INDEX 3u
-#define EXTERNAL_SENSOR_ALTITUDE 4u
-#define EXTERNAL_SENSOR_ALTITUDE_MAX 5u
+#define EXTERNAL_SENSOR_ALTITUDE_GPS_INDEX 4u // this will be the barometer altitude
+#define EXTERNAL_SENSOR_ALTITUDE_INDEX 5u // this one is relative to the ground
+#define EXTERNAL_SENSOR_ALTITUDE_MAX_INDEX 6u
 
 const size_t NumberOfSensors = sizeof(sensors)/sizeof(sensors[0]);
 
@@ -486,7 +488,7 @@ static void handle_ibus_request(uint8_t *packet_buffer)
           packet_buffer[0] = 0x06;
           // packet_buffer[1] is the same is the incomming byte
           packet_buffer[2] = sensors[device_index].id;
-          packet_buffer[3] = (packet_buffer[2] < 0x80) ? 0x02 : 0x04;
+          packet_buffer[3] = (packet_buffer[2] < 0x80u) ? 0x02u : 0x04u;
           //packet_buffer[3] = 0x02;
           transmit_packet(packet_buffer);
         }
@@ -630,13 +632,19 @@ int main(void)
     old_time = current_time;
     old_altitude = current_altitude;
 
-    sensors[EXTERNAL_SENSOR_ALTITUDE].value32 = (uint32_t)current_altitude;
+    // barometer altitude
+    sensors[EXTERNAL_SENSOR_ALTITUDE_GPS_INDEX].value32 = (uint32_t)current_altitude;
+
     if ( (initial_altitude == 0) && (system_counter_ms > 5000))
     { // set initial altitude after 5 seconds first. Let the sensors warm up a little
       initial_altitude = current_altitude;
     }
     if (initial_altitude != 0) {
-      sensors[EXTERNAL_SENSOR_ALTITUDE_MAX].value32 = (uint32_t)((current_altitude-initial_altitude)/100);
+      sensors[EXTERNAL_SENSOR_ALTITUDE_INDEX].value32 = (uint32_t)(current_altitude-initial_altitude);
+      if ((int32_t)sensors[EXTERNAL_SENSOR_ALTITUDE_MAX_INDEX].value32 < (int32_t)sensors[EXTERNAL_SENSOR_ALTITUDE_INDEX].value32)
+      {
+        sensors[EXTERNAL_SENSOR_ALTITUDE_MAX_INDEX].value32 = sensors[EXTERNAL_SENSOR_ALTITUDE_INDEX].value32;
+      }
     }
   }
 }
