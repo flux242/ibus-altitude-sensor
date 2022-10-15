@@ -8,7 +8,6 @@ I had to rewrite the original code becasue it was garbage.
 
 * Precise battery voltage measurement
 * Usable climb rate values
-* GPS altitude is removed because there's no such measurement
 
 ### Hardware changes
 
